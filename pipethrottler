@@ -1,0 +1,76 @@
+#!/usr/bin/env python
+
+# similar to cat except automatically throttles to keep CPU load beneath a specified level
+
+# start cpu monitor in thread
+# cpu monitor updates cpu load every 1 second
+# start cat in main thread, read-write 4k chunks
+# if cpu load is above threshold, throttle using binary exponential backoff algorithm
+
+import sys, psutil, threading, time, random, argparse
+
+class CpuMonitorThread(threading.Thread):
+    def __init__(self):
+        super(CpuMonitorThread, self).__init__()
+        self.cpu_percent = 0
+        self.stopped = False
+
+    def run(self):
+        while not self.stopped:
+            self.cpu_percent = psutil.cpu_percent(interval=1)
+
+    def stop(self):
+        self.stopped = True
+
+class Throttle(object):
+    def __init__(self, minval, maxval, getfunc):
+        self.maxval = maxval
+        self.minval = minval
+        self.getfunc = getfunc
+        self.sleeptime = 0.1
+        self.blocksize = 8192
+
+
+    def adjust(self):
+        curval = self.getfunc()
+        if curval > self.maxval:
+            self.sleeptime *= 1 + 0.1 * random.random()
+            #print("cpu", curval, "sleeptime", self.sleeptime, file=sys.stderr)
+        elif curval < self.minval:
+            self.sleeptime *= 0.8 + 0.1 * random.random()
+            self.sleeptime = max(0.01, self.sleeptime)
+            #print("cpu", curval, "sleeptime", self.sleeptime, file=sys.stderr)
+
+    def check(self):
+        self.adjust()
+        time.sleep(self.sleeptime)
+
+def main(args):
+    print("starting pipethrottler with max CPU limit %d" % args.maxcpu, file=sys.stderr)
+    cpu_thread = CpuMonitorThread()
+    cpu_thread.start()
+    throttler = Throttle(args.mincpu, args.maxcpu, lambda: cpu_thread.cpu_percent)
+
+    try:
+        while True:
+            buf = sys.stdin.buffer.read(1024*8)
+            if buf == "":
+                break
+            sys.stdout.buffer.write(buf)
+            throttler.check()
+    except KeyboardInterrupt:
+        pass
+
+    cpu_thread.stop()
+    cpu_thread.join()
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mincpu', type=int, help='maximum CPU limit allowed before throttling begins', default=50)
+    parser.add_argument('--maxcpu', type=int, help='minimum CPU limit allowed before throttling begins', default=50)
+    p = parser.parse_args()
+    return p
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)
