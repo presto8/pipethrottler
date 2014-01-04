@@ -27,22 +27,28 @@ def read_write_sleep(bufsize, secs):
     need_ms = time_ms - elapsed_ms
     if need_ms > 0:
         time.sleep(need_ms/1000)
-    #debug("elapsed_ms", elapsed_ms, "need_ms", need_ms)
     return True
 
+success_in_a_row = 0
+
 def get_next_bufsize(cur_bufsize, curcpu, maxcpu):
+    global success_in_a_row
+
     step = 10*1024
     if curcpu < maxcpu:
-        cur_bufsize += step
+        success_in_a_row += 1
+        if success_in_a_row >= 5:
+            cur_bufsize += step
+            success_in_a_row = 0
     elif curcpu > maxcpu:
-        debug("cpu too high, throttling down")
-        cur_bufsize -= step*2
+        cur_bufsize -= step*5
+        debug("cpu too high, throttling down", cur_bufsize, "xx")
     return cur_bufsize
 
 def main(args):
     debug("starting pipethrottler with max CPU limit %d" % args.maxcpu)
 
-    bufsize = 100*1024
+    bufsize = args.startbs * 1024
     secs = 1
 
     try:
@@ -59,6 +65,7 @@ def main(args):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--maxcpu', type=int, help='minimum CPU limit allowed before throttling begins', default=50)
+    parser.add_argument('--startbs', type=int, help='starting bufsize in kb', default=100)
     p = parser.parse_args()
     return p
 
