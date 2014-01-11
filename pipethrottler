@@ -10,8 +10,10 @@
 import sys, psutil, threading, time, random, argparse, math
 import datetime
 
+debug_quiet = False # command line --quiet can change this
 def debug(*args):
-    print(*args, file=sys.stderr)
+    if not debug_quiet:
+        print(*args, file=sys.stderr)
 
 def get_ms():
     return int(round(time.time() * 1000))
@@ -46,26 +48,29 @@ def get_next_bufsize(cur_bufsize, curcpu, maxcpu):
     return cur_bufsize
 
 def main(args):
+    global debug_quiet
+    debug_quiet = args.quiet
     debug("starting pipethrottler with max CPU limit %d" % args.maxcpu)
 
-    bufsize = args.startbs * 1024
+    bufsize = args.startbufsize * 1024
     secs = 1
 
     try:
         while True:
             psutil.cpu_percent(interval=0) # call first to start measuring
-            if not read_write_sleep(bufsize, secs):
+            if not read_write_sleep(bufsize, secs): # end-of-file reached
                 break
             cpu = psutil.cpu_percent(interval=0) # second call gets CPU use since previous call
             bufsize = get_next_bufsize(bufsize, cpu, args.maxcpu)
-            debug("cpu", cpu, "bufsize", bufsize/1024, " ")
+            debug("cpu", int(cpu), "bufsize", bufsize/1024, "     ")
     except KeyboardInterrupt:
         pass
 
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Pass through stdin to stdout, automatically throttling if CPU load gets too high.')
     parser.add_argument('--maxcpu', type=int, help='minimum CPU limit allowed before throttling begins', default=50)
-    parser.add_argument('--startbs', type=int, help='starting bufsize in kb', default=100)
+    parser.add_argument('--startbufsize', type=int, help='starting bufsize in kb', default=100)
+    parser.add_argument('--quiet', action='store_true', help="don't output messages to stderr")
     p = parser.parse_args()
     return p
 
